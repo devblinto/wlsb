@@ -1,0 +1,23 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# deploy.yml — zero-downtime, atomic Git release of the Bedrock app.
+#
+# Clones the configured branch into releases/<timestamp>, runs composer install,
+# links shared state (.env, uploads), then atomically flips the `current`
+# symlink and reloads PHP-FPM. Keeps the last N releases for instant rollback.
+#
+#   ansible-playbook deploy.yml -i inventory/production --ask-vault-pass
+#   ansible-playbook deploy.yml -i inventory/production -e "deploy_branch=hotfix"
+# ─────────────────────────────────────────────────────────────────────────────
+- name: Deploy application
+  hosts: web
+  # Connect AS the unprivileged deploy user (overriding the inventory's
+  # provisioning user). No Ansible become is needed — the only privileged action,
+  # reloading PHP-FPM, goes through a narrowly-scoped NOPASSWD sudo rule.
+  remote_user: "{{ deploy_user }}"
+  become: false
+  gather_facts: true
+
+  roles:
+    - role: deploy
+      tags: [deploy]

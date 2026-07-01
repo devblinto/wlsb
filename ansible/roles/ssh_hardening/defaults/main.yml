@@ -1,0 +1,10 @@
+---
+ssh_permit_root_login: false           # "no" once a sudo user exists; "prohibit-password" is a safer middle ground
+ssh_password_authentication: false
+ssh_max_auth_tries: 3
+ssh_login_grace_time: 30
+ssh_client_alive_interval: 300
+ssh_client_alive_count_max: 2
+ssh_x11_forwarding: false
+ssh_allow_agent_forwarding: false
+ssh_port: "{{ ansible_port | default(22) }}"

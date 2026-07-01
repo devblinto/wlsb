@@ -1,0 +1,42 @@
+---
+# ── Composer ───────────────────────────────────────────────────────────────────
+- name: Check for existing Composer
+  ansible.builtin.stat:
+    path: "{{ composer_bin }}"
+  register: composer_stat
+
+- name: Download Composer installer
+  ansible.builtin.get_url:
+    url: "{{ composer_installer_url }}"
+    dest: /tmp/composer-installer.php
+    mode: "0644"
+    checksum: "{{ ('sha384:' + composer_installer_checksum) if composer_installer_checksum | length > 0 else omit }}"
+  when: not composer_stat.stat.exists
+
+- name: Install Composer
+  ansible.builtin.command:
+    cmd: "php /tmp/composer-installer.php --install-dir=/usr/local/bin --filename=composer"
+    creates: "{{ composer_bin }}"
+
+- name: Keep Composer up to date (stable channel)
+  ansible.builtin.command:
+    cmd: "{{ composer_bin }} self-update --stable --no-interaction"
+  register: composer_selfupdate
+  changed_when: "'Upgrading to version' in composer_selfupdate.stdout"
+  # Non-fatal if the server has no outbound access at provision time.
+  failed_when: false
+
+# ── WP-CLI ─────────────────────────────────────────────────────────────────────
+- name: Download WP-CLI phar
+  ansible.builtin.get_url:
+    url: "{{ wpcli_phar_url }}"
+    dest: "{{ wpcli_bin }}"
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Verify WP-CLI runs
+  ansible.builtin.command:
+    cmd: "{{ wpcli_bin }} --info --allow-root"
+  register: wpcli_info
+  changed_when: false

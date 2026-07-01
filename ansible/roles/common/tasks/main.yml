@@ -1,0 +1,110 @@
+---
+- name: Verify supported OS
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+      - ansible_distribution_major_version | int >= 24
+    fail_msg: "This role targets Ubuntu 24.04 LTS or newer (found {{ ansible_distribution }} {{ ansible_distribution_version }})."
+    quiet: true
+
+- name: Set the system timezone
+  community.general.timezone:
+    name: "{{ server_timezone }}"
+
+- name: Update apt cache (valid for 1h)
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Upgrade installed packages to latest security patches
+  ansible.builtin.apt:
+    upgrade: safe
+  register: apt_upgrade
+  retries: 3
+  delay: 10
+  until: apt_upgrade is succeeded
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ common_base_packages }}"
+    state: present
+
+# ── Swap ──────────────────────────────────────────────────────────────────────
+- name: Configure swap file
+  when: swap_file_size_mb | int > 0
+  block:
+    - name: Check for existing swap file
+      ansible.builtin.stat:
+        path: "{{ swap_file_path }}"
+      register: swap_stat
+
+    - name: Allocate swap file
+      ansible.builtin.command:
+        cmd: "fallocate -l {{ swap_file_size_mb }}M {{ swap_file_path }}"
+      when: not swap_stat.stat.exists
+      changed_when: true
+
+    - name: Secure swap file permissions
+      ansible.builtin.file:
+        path: "{{ swap_file_path }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Format swap file
+      ansible.builtin.command:
+        cmd: "mkswap {{ swap_file_path }}"
+      when: not swap_stat.stat.exists
+      changed_when: true
+
+    - name: Enable swap in fstab
+      ansible.posix.mount:
+        path: none
+        src: "{{ swap_file_path }}"
+        fstype: swap
+        opts: sw
+        state: present
+
+    - name: Activate swap now
+      ansible.builtin.command:
+        cmd: "swapon {{ swap_file_path }}"
+      when: not swap_stat.stat.exists
+      changed_when: true
+
+    - name: Set vm.swappiness
+      ansible.posix.sysctl:
+        name: vm.swappiness
+        value: "{{ swap_swappiness }}"
+        state: present
+        sysctl_set: true
+        reload: true
+
+# ── Unattended security upgrades ────────────────────────────────────────────────
+- name: Configure unattended-upgrades
+  when: unattended_upgrades_enabled | bool
+  block:
+    - name: Install unattended-upgrades
+      ansible.builtin.apt:
+        name:
+          - unattended-upgrades
+          - apt-listchanges
+        state: present
+
+    - name: Enable periodic apt updates
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+          APT::Periodic::AutocleanInterval "7";
+
+    - name: Configure unattended-upgrades policy
+      ansible.builtin.template:
+        src: 50unattended-upgrades.j2
+        dest: /etc/apt/apt.conf.d/50unattended-upgrades
+        owner: root
+        group: root
+        mode: "0644"

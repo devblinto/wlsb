@@ -1,0 +1,26 @@
+---
+# Guard against locking ourselves out: refuse to disable password auth unless a
+# key is already present for the connecting user.
+- name: Confirm admin SSH keys are in place before hardening
+  ansible.builtin.assert:
+    that: admin_ssh_keys | default([]) | length > 0
+    fail_msg: "Refusing to harden SSH: no admin_ssh_keys configured (would cause lockout)."
+    quiet: true
+
+- name: Deploy hardened sshd drop-in config
+  ansible.builtin.template:
+    src: 99-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/99-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+    # Validate the merged config before it can break the daemon.
+    validate: "sshd -t -f %s"
+  notify: Restart sshd
+
+# Ubuntu 24.04 ships ssh as a socket-activated service (ssh.socket). Ensure the
+# service itself is enabled so config changes take effect on reconnect.
+- name: Ensure ssh service is enabled
+  ansible.builtin.service:
+    name: ssh
+    enabled: true

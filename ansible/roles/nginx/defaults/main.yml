@@ -1,0 +1,17 @@
+---
+nginx_worker_connections: 1024
+nginx_client_max_body_size: "64M"
+nginx_keepalive_timeout: 65
+nginx_server_tokens: "off"
+nginx_fastcgi_read_timeout: 120
+
+# Shared ACME webroot used for HTTP-01 challenges.
+letsencrypt_webroot: /var/www/letsencrypt
+
+# HSTS is only emitted once TLS is confirmed working. max-age = 1 year.
+nginx_hsts_max_age: 31536000
+
+deploy_path: "/srv/www/{{ site_name | default('app') }}"
+php_version: "8.3"
+site_domain: example.com
+site_aliases: []

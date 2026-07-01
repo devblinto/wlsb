@@ -1,0 +1,26 @@
+---
+deploy_user: deploy
+deploy_group: "{{ deploy_user }}"
+deploy_path: "/srv/www/{{ site_name | default('app') }}"
+
+deploy_repo: ""
+deploy_branch: main
+deploy_keep_releases: 5
+deploy_git_depth: 1
+
+# Production Composer install: no dev deps, optimised autoloader.
+composer_bin: /usr/local/bin/composer
+composer_install_flags: "--no-dev --optimize-autoloader --no-interaction --prefer-dist --no-progress"
+
+wpcli_bin: /usr/local/bin/wp
+php_version: "8.3"
+
+# Kept in sync with the wordpress role so symlinks match what provisioning created.
+deploy_shared_dirs:
+  - web/app/uploads
+deploy_shared_files:
+  - .env
+
+# Run WP-CLI cache/rewrite maintenance after the symlink flip (skipped
+# automatically until WordPress is actually installed).
+deploy_run_wpcli_maintenance: true

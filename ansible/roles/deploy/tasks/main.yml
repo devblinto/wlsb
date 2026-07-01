@@ -1,0 +1,102 @@
+---
+- name: Validate deploy configuration
+  ansible.builtin.assert:
+    that:
+      - deploy_repo | length > 0
+      - deploy_path | length > 0
+    fail_msg: "deploy_repo and deploy_path must be set."
+    quiet: true
+
+- name: Compute the new release path
+  ansible.builtin.set_fact:
+    # iso8601_basic_short → e.g. 20260701T142530, sorts chronologically by name.
+    release_name: "{{ ansible_date_time.iso8601_basic_short }}"
+    release_path: "{{ deploy_path }}/releases/{{ ansible_date_time.iso8601_basic_short }}"
+
+- name: "Deploy release {{ release_name }}"
+  block:
+    - name: Create the release directory
+      ansible.builtin.file:
+        path: "{{ release_path }}"
+        state: directory
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
+        mode: "0755"
+
+    - name: Check out the application from Git
+      ansible.builtin.git:
+        repo: "{{ deploy_repo }}"
+        dest: "{{ release_path }}"
+        version: "{{ deploy_branch }}"
+        depth: "{{ deploy_git_depth }}"
+        force: true
+        # Host key is pre-seeded in known_hosts by the wordpress role.
+        accept_hostkey: false
+      register: git_checkout
+
+    - name: Record the deployed revision
+      ansible.builtin.copy:
+        dest: "{{ release_path }}/REVISION"
+        content: "{{ git_checkout.after }}\n"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
+        mode: "0644"
+
+    # ── Link persistent shared state into the release ──────────────────────────
+    - name: Remove release placeholders that will become shared symlinks (dirs)
+      ansible.builtin.file:
+        path: "{{ release_path }}/{{ item }}"
+        state: absent
+      loop: "{{ deploy_shared_dirs }}"
+
+    - name: Ensure parent directories exist for shared symlinks
+      ansible.builtin.file:
+        path: "{{ release_path }}/{{ item | dirname }}"
+        state: directory
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
+        mode: "0755"
+      loop: "{{ deploy_shared_dirs + deploy_shared_files }}"
+
+    - name: Link shared directories
+      ansible.builtin.file:
+        src: "{{ deploy_path }}/shared/{{ item }}"
+        dest: "{{ release_path }}/{{ item }}"
+        state: link
+        force: true
+      loop: "{{ deploy_shared_dirs }}"
+
+    - name: Link shared files
+      ansible.builtin.file:
+        src: "{{ deploy_path }}/shared/{{ item }}"
+        dest: "{{ release_path }}/{{ item }}"
+        state: link
+        force: true
+      loop: "{{ deploy_shared_files }}"
+
+    # ── Build ──────────────────────────────────────────────────────────────────
+    - name: Install Composer dependencies (production)
+      ansible.builtin.command:
+        cmd: "{{ composer_bin }} install {{ composer_install_flags }}"
+        chdir: "{{ release_path }}"
+      environment:
+        COMPOSER_HOME: "/home/{{ deploy_user }}/.composer"
+        COMPOSER_ALLOW_SUPERUSER: "0"
+      register: composer_install
+      changed_when: "'Nothing to install' not in composer_install.stdout"
+
+  rescue:
+    - name: Clean up the failed release
+      ansible.builtin.file:
+        path: "{{ release_path }}"
+        state: absent
+
+    - name: Fail the deploy
+      ansible.builtin.fail:
+        msg: >-
+          Release {{ release_name }} failed to build and was removed. The live
+          site is untouched (still serving the previous release).
+
+# ── Go live (atomic) and finalise ──────────────────────────────────────────────
+- name: Finalise the release
+  ansible.builtin.include_tasks: finalize.yml

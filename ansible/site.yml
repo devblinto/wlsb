@@ -1,0 +1,10 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# site.yml — full run: provision the server, then deploy the application.
+#
+#   ansible-playbook site.yml -i inventory/production --ask-vault-pass
+#
+# For day-to-day code releases you usually only need deploy.yml.
+# ─────────────────────────────────────────────────────────────────────────────
+- import_playbook: provision.yml
+- import_playbook: deploy.yml

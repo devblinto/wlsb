@@ -1,0 +1,18 @@
+---
+deploy_user: deploy
+deploy_group: "{{ deploy_user }}"
+deploy_path: "/srv/www/{{ site_name | default('app') }}"
+
+# Paths (relative to a release) that are symlinked to persistent shared state so
+# they survive across releases. Bedrock stores uploads under web/app/uploads.
+deploy_shared_dirs:
+  - web/app/uploads
+deploy_shared_files:
+  - .env
+
+db_host: "127.0.0.1"
+db_prefix: "wp_"
+
+deploy_use_deploy_key: false
+deploy_git_host: github.com
+vault_deploy_private_key: ""

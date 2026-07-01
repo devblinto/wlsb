@@ -1,0 +1,57 @@
+---
+- name: Install Nginx
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+
+- name: Remove the default Nginx site
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/nginx/sites-enabled/default
+    - /etc/nginx/sites-available/default
+  notify: Reload nginx
+
+- name: Apply global Nginx hardening/tuning
+  ansible.builtin.template:
+    src: 10-hardening.conf.j2
+    dest: /etc/nginx/conf.d/10-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Install reusable Nginx snippets
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/nginx/snippets/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - ssl-params.conf
+    - security-headers.conf
+  notify: Reload nginx
+
+- name: Create the ACME challenge webroot
+  ansible.builtin.file:
+    path: "{{ letsencrypt_webroot }}/.well-known/acme-challenge"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0755"
+
+- name: Configure the site virtual host
+  ansible.builtin.include_tasks: vhost.yml
+
+- name: Ensure Nginx is started and enabled
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true
+
+# Apply any pending reload now so the HTTP vhost (with the ACME challenge
+# location) is definitely live before the letsencrypt role requests a cert.
+- name: Flush handlers so the vhost is active before TLS issuance
+  ansible.builtin.meta: flush_handlers

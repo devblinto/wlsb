@@ -1,0 +1,96 @@
+---
+# ── Release-management directory layout ─────────────────────────────────────────
+- name: Create deploy layout directories
+  ansible.builtin.file:
+    path: "{{ deploy_path }}/{{ item }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_group }}"
+    mode: "0755"
+  loop:
+    - releases
+    - shared
+
+- name: Create shared directories (persist across releases)
+  ansible.builtin.file:
+    path: "{{ deploy_path }}/shared/{{ item }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_group }}"
+    # Uploads must be writable by PHP-FPM (runs as the deploy user).
+    mode: "0775"
+  loop: "{{ deploy_shared_dirs }}"
+
+# ── Shared .env (single source of runtime secrets/config on the server) ─────────
+- name: Template the shared .env file
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ deploy_path }}/shared/.env"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_group }}"
+    mode: "0640"
+  no_log: true
+
+# ── Git deploy key (for cloning a private repository) ───────────────────────────
+- name: Configure the Git deploy key
+  when: deploy_use_deploy_key | bool and vault_deploy_private_key | length > 0
+  block:
+    - name: Ensure the deploy user's ~/.ssh exists
+      ansible.builtin.file:
+        path: "/home/{{ deploy_user }}/.ssh"
+        state: directory
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
+        mode: "0700"
+
+    - name: Install the private deploy key
+      ansible.builtin.copy:
+        content: "{{ vault_deploy_private_key }}"
+        dest: "/home/{{ deploy_user }}/.ssh/id_deploy"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
+        mode: "0600"
+      no_log: true
+
+    - name: Point Git at the deploy key for the repo host
+      ansible.builtin.blockinfile:
+        path: "/home/{{ deploy_user }}/.ssh/config"
+        create: true
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_group }}"
+        mode: "0600"
+        marker: "# {mark} ANSIBLE MANAGED — {{ deploy_git_host }}"
+        block: |
+          Host {{ deploy_git_host }}
+            HostName {{ deploy_git_host }}
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+
+# ── System WP-Cron (since DISABLE_WP_CRON is true in .env) ───────────────────────
+- name: Schedule WP-Cron via the system crontab
+  ansible.builtin.cron:
+    name: "wp-cron {{ site_name }}"
+    user: "{{ deploy_user }}"
+    minute: "*/5"
+    job: >-
+      cd {{ deploy_path }}/current && /usr/local/bin/wp cron event run --due-now
+      --quiet > /dev/null 2>&1
+    cron_file: "wp-cron-{{ site_name }}"
+
+- name: Scan the Git host key (from the server, so no control-node dependency)
+  when: deploy_use_deploy_key | bool
+  become_user: "{{ deploy_user }}"
+  ansible.builtin.command:
+    cmd: "ssh-keyscan -t rsa,ecdsa,ed25519 {{ deploy_git_host }}"
+  register: git_hostkeys
+  changed_when: false
+
+- name: Add the Git host to the deploy user's known_hosts
+  when: deploy_use_deploy_key | bool
+  become_user: "{{ deploy_user }}"
+  ansible.builtin.known_hosts:
+    path: "/home/{{ deploy_user }}/.ssh/known_hosts"
+    name: "{{ deploy_git_host }}"
+    key: "{{ item }}"
+    state: present
+  loop: "{{ git_hostkeys.stdout_lines | default([]) }}"
