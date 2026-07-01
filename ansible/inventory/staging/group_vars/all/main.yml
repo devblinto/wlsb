@@ -9,14 +9,14 @@ deploy_user: deploy
 deploy_group: "{{ deploy_user }}"
 deploy_path: "/srv/www/{{ site_name }}"
 
-site_domain: staging.example.com
+site_domain: wlsb.growsellapp.com
 site_aliases: []
 wp_env: staging                          # loads config/environments/staging.php
 wp_home: "https://{{ site_domain }}"
 wp_siteurl: "{{ wp_home }}/wp"
 
-deploy_repo: "git@github.com:your-org/wlsb.git"
-deploy_branch: main                      # or a dedicated `staging` branch
+deploy_repo: "git@github.com:devblinto/wlsb.git"
+deploy_branch: dev                       # staging tracks the dev branch
 deploy_keep_releases: 3
 deploy_use_deploy_key: true
 deploy_git_host: github.com
