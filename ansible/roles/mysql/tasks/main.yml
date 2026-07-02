@@ -21,11 +21,15 @@
     url: "{{ mysql_apt_key_url }}"
     dest: /tmp/mysql-apt-key.asc
     mode: "0644"
+    force: true # always fetch the current key so a rotated/renewed key is picked up
+  register: mysql_apt_key_download
 
 - name: Install the MySQL signing key into a dedicated keyring
   ansible.builtin.command:
     cmd: "gpg --batch --yes --dearmor -o {{ mysql_apt_keyring }} /tmp/mysql-apt-key.asc"
-    creates: "{{ mysql_apt_keyring }}"
+  # Re-dearmor only when the downloaded key actually changed (idempotent, and
+  # correctly refreshes the keyring on key rotation).
+  when: mysql_apt_key_download is changed
 
 - name: Add the MySQL 8.4 LTS APT repository
   ansible.builtin.apt_repository:
