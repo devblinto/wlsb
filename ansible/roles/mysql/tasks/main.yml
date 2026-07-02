@@ -141,7 +141,10 @@
 - name: Create the application database user
   community.mysql.mysql_user:
     name: "{{ db_user }}"
-    password: "{{ db_password }}"
+    # MySQL 8.4 doesn't load mysql_native_password (what `password:` uses); create
+    # the user with caching_sha2_password to match the server's default auth.
+    plugin: caching_sha2_password
+    plugin_auth_string: "{{ db_password }}"
     host: localhost
     priv: "{{ db_name }}.*:ALL"
     state: present
