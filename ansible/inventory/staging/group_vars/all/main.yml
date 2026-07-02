@@ -52,8 +52,8 @@ firewall_allowed_tcp_ports:
   - "443"
 
 admin_ssh_keys: "{{ vault_admin_ssh_keys | default([]) }}"
-ssh_permit_root_login: false
-ssh_password_authentication: false
+ssh_permit_root_login: true          # allow root login (incl. password)
+ssh_password_authentication: true    # allow password auth for all users
 
 server_timezone: "Etc/UTC"
 swap_file_size_mb: 2048
