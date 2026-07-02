@@ -21,7 +21,7 @@ wp_home: "https://{{ site_domain }}"
 wp_siteurl: "{{ wp_home }}/wp"
 
 # ── Application source (Git) ──────────────────────────────────────────────────
-deploy_repo: "git@github.com:your-org/wlsb.git"  # ← your Git remote
+deploy_repo: "git@github.com:devblinto/wlsb.git"  # ← your Git remote
 deploy_branch: main
 deploy_keep_releases: 5                   # how many old releases to retain
 # Set true if the repo is private and the server authenticates with a deploy key
