@@ -3,8 +3,8 @@ server_tokens {{ nginx_server_tokens }};
 client_max_body_size {{ nginx_client_max_body_size }};
 keepalive_timeout {{ nginx_keepalive_timeout }};
 
-# Compression.
-gzip on;
+# Compression. (gzip is already switched on in the stock nginx.conf http{}
+# block; re-declaring it here is a duplicate directive, so only tune it.)
 gzip_vary on;
 gzip_comp_level 5;
 gzip_min_length 256;
