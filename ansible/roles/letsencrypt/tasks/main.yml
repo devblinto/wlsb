@@ -10,6 +10,14 @@
     name: certbot
     state: present
 
+- name: Ensure the certbot deploy-hook directory exists
+  ansible.builtin.file:
+    path: /etc/letsencrypt/renewal-hooks/deploy
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Install the renewal deploy-hook (reload Nginx after each renewal)
   ansible.builtin.copy:
     dest: /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
