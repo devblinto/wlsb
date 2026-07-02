@@ -150,7 +150,9 @@
     # the user with caching_sha2_password to match the server's default auth.
     plugin: caching_sha2_password
     plugin_auth_string: "{{ db_password }}"
-    host: localhost
+    # Match the host the app actually connects from (db_host, e.g. 127.0.0.1).
+    # 'localhost' (socket) and '127.0.0.1' (TCP) are distinct grants in MySQL.
+    host: "{{ db_host }}"
     priv: "{{ db_name }}.*:ALL"
     state: present
     login_unix_socket: "{{ mysql_socket }}"
