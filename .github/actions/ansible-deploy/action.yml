@@ -1,0 +1,131 @@
+name: Ansible deploy
+description: >-
+  Configure SSH on the CI runner and run an Ansible playbook (deploy or
+  rollback) against an environment inventory, connecting as the unprivileged
+  deploy user. Secrets are passed via env and never interpolated into the shell.
+
+inputs:
+  playbook:
+    description: Playbook to run, relative to the ansible/ directory.
+    default: deploy.yml
+  inventory:
+    description: Inventory path relative to ansible/ (e.g. inventory/production).
+    required: true
+  ref:
+    description: >-
+      Git commit SHA to deploy (pins deploy_branch to an immutable ref).
+      Leave empty for rollback, which re-points to the previous release.
+    default: ""
+  deploy-user:
+    description: Unprivileged user to SSH in as on the target host.
+    default: deploy
+  ansible-core-version:
+    description: pip version spec for ansible-core (pinned for reproducibility).
+    default: ">=2.16,<2.19"
+  health-check-url:
+    description: If set, GET this URL after the play and require an HTTP 200.
+    default: ""
+  extra-args:
+    description: Extra flags appended verbatim to the ansible-playbook command.
+    default: ""
+  ssh-private-key:
+    description: Private SSH key of the deploy user. SECRET.
+    required: true
+  known-hosts:
+    description: SSH known_hosts entry/entries for the target host. SECRET.
+    required: true
+  vault-password:
+    description: Ansible Vault password to decrypt the committed vault.yml. SECRET.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.x"
+
+    - name: Install Ansible and Galaxy collections
+      shell: bash
+      working-directory: ansible
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install "ansible-core${{ inputs.ansible-core-version }}"
+        ansible-galaxy collection install -r requirements.yml
+
+    - name: Configure SSH (key + known_hosts)
+      shell: bash
+      env:
+        SSH_PRIVATE_KEY: ${{ inputs.ssh-private-key }}
+        KNOWN_HOSTS: ${{ inputs.known-hosts }}
+      run: |
+        install -m 700 -d ~/.ssh
+        printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+        printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+        chmod 644 ~/.ssh/known_hosts
+
+    - name: Write Ansible Vault password file
+      shell: bash
+      env:
+        VAULT_PASSWORD: ${{ inputs.vault-password }}
+      run: |
+        printf '%s' "$VAULT_PASSWORD" > "$RUNNER_TEMP/vault_pass"
+        chmod 600 "$RUNNER_TEMP/vault_pass"
+
+    - name: Run playbook
+      shell: bash
+      working-directory: ansible
+      env:
+        ANSIBLE_FORCE_COLOR: "1"
+        PLAYBOOK: ${{ inputs.playbook }}
+        INVENTORY: ${{ inputs.inventory }}
+        REF: ${{ inputs.ref }}
+        DEPLOY_USER: ${{ inputs.deploy-user }}
+        EXTRA_ARGS: ${{ inputs.extra-args }}
+      run: |
+        set -euo pipefail
+        args=(
+          "$PLAYBOOK"
+          -i "$INVENTORY"
+          --private-key "$HOME/.ssh/deploy_key"
+          --vault-password-file "$RUNNER_TEMP/vault_pass"
+          # Extra-vars win over everything, so the login user is deterministic
+          # regardless of the inventory's provisioning `ansible_user: root`.
+          -e "ansible_user=$DEPLOY_USER"
+        )
+        # Deploy the exact commit that passed CI (immutable), not a moving branch.
+        if [ -n "$REF" ]; then
+          args+=(-e "deploy_branch=$REF")
+        fi
+        if [ -n "$EXTRA_ARGS" ]; then
+          # shellcheck disable=SC2206
+          args+=($EXTRA_ARGS)
+        fi
+        echo "+ ansible-playbook ${args[*]}"
+        ansible-playbook "${args[@]}"
+
+    - name: Smoke test
+      if: inputs.health-check-url != ''
+      shell: bash
+      env:
+        URL: ${{ inputs.health-check-url }}
+      run: |
+        set -euo pipefail
+        for i in 1 2 3 4 5 6; do
+          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$URL" || echo 000)"
+          echo "Attempt $i -> HTTP $code"
+          if [ "$code" = "200" ]; then
+            echo "Health check passed."
+            exit 0
+          fi
+          sleep 5
+        done
+        echo "::error::Health check failed for $URL (never returned 200)"
+        exit 1
+
+    - name: Remove secrets from the runner
+      if: always()
+      shell: bash
+      run: rm -f "$HOME/.ssh/deploy_key" "$RUNNER_TEMP/vault_pass"

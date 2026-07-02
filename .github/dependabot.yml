@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # Keep the actions used in workflows patched (supply-chain hygiene). Pair this
+  # with pinning actions to full commit SHAs for the strongest guarantee.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # The nested composite action pins its own actions; keep those current too.
+  - package-ecosystem: github-actions
+    directory: "/.github/actions/ansible-deploy"
+    schedule:
+      interval: weekly
+
+  # Keep PHP (Composer) dependencies patched.
+  - package-ecosystem: composer
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
