@@ -2,7 +2,7 @@
 mysql_version: "8.4"
 # Oracle APT repo component that provides the 8.4 LTS series.
 mysql_apt_component: "mysql-{{ mysql_version }}-lts"
-mysql_apt_key_url: "https://repo.mysql.com/RPM-GPG-KEY-mysql-2023"
+mysql_apt_key_url: "https://repo.mysql.com/RPM-GPG-KEY-mysql-2025"
 mysql_apt_keyring: /etc/apt/keyrings/mysql.gpg
 
 mysql_socket: /var/run/mysqld/mysqld.sock
