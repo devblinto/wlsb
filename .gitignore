@@ -32,3 +32,9 @@ phpunit.xml
 
 # WP-CLI
 wp-cli.local.yml
+
+# Docs
+docs/
+
+# GitHub
+.github/
