@@ -1,6 +1,8 @@
 # Application
 web/app/plugins/*
 !web/app/plugins/.gitkeep
+# Track the first-party access-management plugin (deployed via git + composer)
+!web/app/plugins/wlsb-access/
 # Ignore Composer-installed mu-plugin directories; single-file mu-plugins are tracked intentionally
 web/app/mu-plugins/*/
 web/app/themes/twentytwentyfive/

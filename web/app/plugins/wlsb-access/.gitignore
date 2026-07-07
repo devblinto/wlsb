@@ -1,0 +1,7 @@
+# Dev-only tooling artifacts — the plugin has NO runtime Composer dependencies,
+# so nothing here is needed in production (deploy runs `composer install --no-dev`
+# at the project root, which never touches this plugin's dev deps).
+/vendor/
+/.phpunit.cache/
+.phpunit.result.cache
+/.php-cs-fixer.cache
