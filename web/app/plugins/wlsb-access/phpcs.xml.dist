@@ -28,6 +28,7 @@
     <rule ref="WordPress.Security.EscapeOutput.ExceptionNotEscaped">
         <exclude-pattern>*/src/Application/*</exclude-pattern>
         <exclude-pattern>*/src/Domain/*</exclude-pattern>
+        <exclude-pattern>*/src/Infrastructure/*</exclude-pattern>
     </rule>
     <!-- Prepared SQL and placeholder correctness for all $wpdb usage. -->
     <rule ref="WordPress.DB.PreparedSQL"/>
@@ -35,7 +36,14 @@
     <!-- Flag hardcoded/ambiguous capability strings. -->
     <rule ref="WordPress.WP.Capabilities"/>
     <!-- Fail on syntax not supported by the PHP 8.3 platform floor. -->
-    <rule ref="PHPCompatibility"/>
+    <rule ref="PHPCompatibility">
+        <!--
+            PHPCompatibility 9.3 predates PHP 8.1 enums and misreads $this inside
+            an enum method as being outside object context. This is valid on our
+            PHP 8.3 floor, so the false positive is excluded.
+        -->
+        <exclude name="PHPCompatibility.Variables.ForbiddenThisUseContexts.OutsideObjectContext"/>
+    </rule>
 
     <exclude-pattern>*/tests/*</exclude-pattern>
     <exclude-pattern>*/vendor/*</exclude-pattern>

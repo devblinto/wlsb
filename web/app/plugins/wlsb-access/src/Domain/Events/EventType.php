@@ -18,4 +18,11 @@ enum EventType: string
     case RoleCreated = 'role.created';
     case RoleUpdated = 'role.updated';
     case RoleDeleted = 'role.deleted';
+
+    case RegistrationCreated = 'registration.created';
+    case EmailTokenIssued = 'email.token_issued';
+    case EmailVerified = 'email.verified';
+    case StatusChanged = 'user.status_changed';
+    case NotificationSent = 'notification.sent';
+    case NotificationFailed = 'notification.failed';
 }

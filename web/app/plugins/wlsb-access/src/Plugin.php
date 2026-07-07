@@ -8,27 +8,48 @@ use Wlsb\Access\Application\Access\BreakGlass;
 use Wlsb\Access\Application\Access\CustomRoleManager;
 use Wlsb\Access\Application\Access\MatrixBuilder;
 use Wlsb\Access\Application\Access\MatrixFormMapper;
+use Wlsb\Access\Application\Lifecycle\UserLifecycleManager;
+use Wlsb\Access\Application\Notifications\NotificationService;
 use Wlsb\Access\Application\Reconciliation;
+use Wlsb\Access\Application\Registration\EmailVerificationService;
+use Wlsb\Access\Application\Registration\RegistrationService;
+use Wlsb\Access\Application\Registration\RegistrationUrls;
 use Wlsb\Access\Delivery\Admin\AccessMatrixPage;
 use Wlsb\Access\Delivery\Admin\BreakGlassCapabilityFilter;
 use Wlsb\Access\Delivery\Admin\RolesPage;
+use Wlsb\Access\Delivery\Auth\AuthenticationGuard;
 use Wlsb\Access\Delivery\Cli\ReconcileCommand;
+use Wlsb\Access\Delivery\Frontend\RegistrationShortcodes;
+use Wlsb\Access\Delivery\Privacy\PrivacyIntegration;
 use Wlsb\Access\Domain\Capabilities\CapabilityRegistry;
 use Wlsb\Access\Domain\Catalog;
 use Wlsb\Access\Domain\Clock\Clock;
 use Wlsb\Access\Domain\Events\EventLogger;
+use Wlsb\Access\Domain\Mail\Mailer;
+use Wlsb\Access\Domain\Roles\Role;
 use Wlsb\Access\Domain\Roles\RoleOverrideRepository;
 use Wlsb\Access\Domain\Roles\RoleReconciler;
 use Wlsb\Access\Domain\Roles\RoleRegistry;
 use Wlsb\Access\Domain\Roles\RolesGateway;
+use Wlsb\Access\Domain\Tokens\HmacTokenHasher;
+use Wlsb\Access\Domain\Tokens\TokenGenerator;
+use Wlsb\Access\Domain\Tokens\TokenHasher;
+use Wlsb\Access\Domain\Users\UserDirectory;
+use Wlsb\Access\Domain\Workflow\WorkflowConfigStore;
 use Wlsb\Access\Infrastructure\Clock\SystemClock;
 use Wlsb\Access\Infrastructure\Database\MigrationRunner;
 use Wlsb\Access\Infrastructure\Database\Migrations\CreateEventLogTable;
 use Wlsb\Access\Infrastructure\Database\OptionVersionStore;
 use Wlsb\Access\Infrastructure\Database\VersionStore;
 use Wlsb\Access\Infrastructure\Events\WpdbEventLogger;
+use Wlsb\Access\Infrastructure\Mail\ResendMailer;
+use Wlsb\Access\Infrastructure\Pages\PageProvisioner;
+use Wlsb\Access\Infrastructure\Pages\WpRegistrationUrls;
 use Wlsb\Access\Infrastructure\Roles\OptionRoleOverrideRepository;
 use Wlsb\Access\Infrastructure\Roles\WpRolesGateway;
+use Wlsb\Access\Infrastructure\Tokens\RandomTokenGenerator;
+use Wlsb\Access\Infrastructure\Users\WpUserDirectory;
+use Wlsb\Access\Infrastructure\Workflow\OptionWorkflowConfigStore;
 use Wlsb\Access\Support\Container;
 
 /**
@@ -45,7 +66,7 @@ use Wlsb\Access\Support\Container;
  */
 final class Plugin
 {
-    public const VERSION = '0.1.0';
+    public const VERSION = '0.2.0';
 
     public const TEXT_DOMAIN = 'wlsb-access';
 
@@ -54,6 +75,10 @@ final class Plugin
     private const DB_VERSION_OPTION = 'wlsb_access_db_version';
 
     private const OVERRIDES_OPTION = 'wlsb_role_overrides';
+
+    private const WORKFLOW_OPTION = 'wlsb_access_workflow_config';
+
+    private const PAGES_READY_OPTION = 'wlsb_access_pages_ready';
 
     private const EVENT_LOG_TABLE = 'wlsb_event_log';
 
@@ -82,6 +107,25 @@ final class Plugin
         // Break-glass recovery: runtime-only grant via user_has_cap.
         add_filter('user_has_cap', [$plugin->container->get(BreakGlassCapabilityFilter::class), 'filter'], 10, 4);
 
+        // Front-end shortcodes + GDPR integration.
+        add_action('init', static function () use ($plugin): void {
+            $plugin->container->get(RegistrationShortcodes::class)->register();
+            $plugin->container->get(PrivacyIntegration::class)->register();
+        });
+
+        // Block non-active accounts from authenticating (standard login + app passwords).
+        add_filter('wp_authenticate_user', static fn($user, $password = '') => $plugin->container->get(AuthenticationGuard::class)->filter($user, (string) $password), 20, 2);
+        add_filter('wp_authenticate_application_password', static fn($input, $user) => $plugin->container->get(AuthenticationGuard::class)->filterApplicationPassword($input, $user), 20, 2);
+
+        // Provision the front-end pages on the first admin request after install/upgrade.
+        // Deferred to admin_init because post creation is unsafe on plugins_loaded.
+        add_action('admin_init', static function () use ($plugin): void {
+            if (! get_option(self::PAGES_READY_OPTION)) {
+                $plugin->container->get(PageProvisioner::class)->ensure();
+                update_option(self::PAGES_READY_OPTION, '1');
+            }
+        });
+
         if (defined('WP_CLI') && WP_CLI) {
             \WP_CLI::add_command(
                 'wlsb reconcile',
@@ -95,6 +139,8 @@ final class Plugin
     public function activate(): void
     {
         $this->reconcile();
+        $this->container->get(PageProvisioner::class)->ensure();
+        update_option(self::PAGES_READY_OPTION, '1');
         update_option(self::VERSION_OPTION, self::VERSION, true);
     }
 
@@ -107,13 +153,24 @@ final class Plugin
     /**
      * Boot-time version guard: reconcile once per install/upgrade, then no-op
      * (a single autoloaded-option read) on every subsequent request.
+     *
+     * The reconcile itself is deferred to `init` (priority 20, after the text
+     * domain loads at 10) because it resolves translated role/capability labels,
+     * and calling translation functions before `init` is incorrect on WP 6.7+.
      */
     public function boot(): void
     {
         if (get_option(self::VERSION_OPTION) !== self::VERSION) {
-            $this->reconcile();
-            update_option(self::VERSION_OPTION, self::VERSION, true);
+            add_action('init', [$this, 'runUpgrade'], 20);
         }
+    }
+
+    public function runUpgrade(): void
+    {
+        $this->reconcile();
+        // Re-provision pages on the next admin request (safe context).
+        delete_option(self::PAGES_READY_OPTION);
+        update_option(self::VERSION_OPTION, self::VERSION, true);
     }
 
     public function loadTextDomain(): void
@@ -241,6 +298,70 @@ final class Plugin
                 $c->get(EventLogger::class),
             ),
         );
+
+        // --- Phase 2: registration, verification, notifications -------------
+
+        $container->singleton(UserDirectory::class, static fn(): UserDirectory => new WpUserDirectory());
+        $container->singleton(PageProvisioner::class, static fn(): PageProvisioner => new PageProvisioner());
+        $container->singleton(RegistrationUrls::class, static fn(Container $c): RegistrationUrls => new WpRegistrationUrls($c->get(PageProvisioner::class)));
+        $container->singleton(TokenGenerator::class, static fn(): TokenGenerator => new RandomTokenGenerator());
+        $container->singleton(TokenHasher::class, static fn(): TokenHasher => new HmacTokenHasher((string) wp_salt('auth')));
+        $container->singleton(WorkflowConfigStore::class, static fn(): WorkflowConfigStore => new OptionWorkflowConfigStore(self::WORKFLOW_OPTION));
+
+        $container->singleton(Mailer::class, static function (): Mailer {
+            $apiKey = defined('RESEND_API_KEY') && RESEND_API_KEY !== '' ? (string) RESEND_API_KEY : null;
+            $fromEmail = defined('WLSB_MAIL_FROM') && WLSB_MAIL_FROM !== ''
+                ? (string) WLSB_MAIL_FROM
+                : 'no-reply@' . ((string) (wp_parse_url(home_url(), PHP_URL_HOST) ?: 'example.com'));
+            $fromName = defined('WLSB_MAIL_FROM_NAME') && WLSB_MAIL_FROM_NAME !== ''
+                ? (string) WLSB_MAIL_FROM_NAME
+                : (string) get_bloginfo('name');
+
+            return new ResendMailer($apiKey, $fromEmail, $fromName);
+        });
+
+        $container->singleton(NotificationService::class, static fn(Container $c): NotificationService => new NotificationService(
+            $c->get(Mailer::class),
+            $c->get(EventLogger::class),
+            (string) get_bloginfo('name'),
+        ));
+
+        $container->singleton(UserLifecycleManager::class, static fn(Container $c): UserLifecycleManager => new UserLifecycleManager(
+            $c->get(UserDirectory::class),
+            Role::PENDING,
+            $c->get(EventLogger::class),
+        ));
+
+        $container->singleton(EmailVerificationService::class, static fn(Container $c): EmailVerificationService => new EmailVerificationService(
+            $c->get(UserDirectory::class),
+            $c->get(UserLifecycleManager::class),
+            $c->get(WorkflowConfigStore::class),
+            $c->get(TokenGenerator::class),
+            $c->get(TokenHasher::class),
+            $c->get(NotificationService::class),
+            $c->get(RegistrationUrls::class),
+            $c->get(Clock::class),
+            $c->get(EventLogger::class),
+        ));
+
+        $container->singleton(RegistrationService::class, static fn(Container $c): RegistrationService => new RegistrationService(
+            $c->get(UserDirectory::class),
+            $c->get(WorkflowConfigStore::class),
+            $c->get(EmailVerificationService::class),
+            $c->get(EventLogger::class),
+            Role::PENDING,
+        ));
+
+        $container->singleton(RegistrationShortcodes::class, static fn(Container $c): RegistrationShortcodes => new RegistrationShortcodes(
+            $c->get(RegistrationService::class),
+            $c->get(EmailVerificationService::class),
+            $c->get(WorkflowConfigStore::class),
+            $c->get(UserDirectory::class),
+            $c->get(PageProvisioner::class),
+        ));
+
+        $container->singleton(AuthenticationGuard::class, static fn(Container $c): AuthenticationGuard => new AuthenticationGuard($c->get(UserLifecycleManager::class)));
+        $container->singleton(PrivacyIntegration::class, static fn(Container $c): PrivacyIntegration => new PrivacyIntegration($c->get(UserDirectory::class)));
 
         return $container;
     }

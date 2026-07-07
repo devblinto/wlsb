@@ -150,6 +150,14 @@ Config::define('DISALLOW_FILE_EDIT', true);
 // Disable plugin and theme updates and installation from the admin
 Config::define('DISALLOW_FILE_MODS', true);
 
+/**
+ * wlsb-access — transactional email via Resend (https://resend.com).
+ * The plugin reads these constants; secrets live in .env.
+ */
+Config::define('RESEND_API_KEY', env('RESEND_API_KEY') ?: '');
+Config::define('WLSB_MAIL_FROM', env('WLSB_MAIL_FROM') ?: '');
+Config::define('WLSB_MAIL_FROM_NAME', env('WLSB_MAIL_FROM_NAME') ?: '');
+
 // Limit the number of post revisions
 Config::define('WP_POST_REVISIONS', env('WP_POST_REVISIONS') ?? true);
 

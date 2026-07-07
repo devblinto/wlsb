@@ -113,6 +113,27 @@ if (! function_exists('esc_attr__')) {
     }
 }
 
+if (! function_exists('esc_html')) {
+    function esc_html(string $text): string
+    {
+        return $text;
+    }
+}
+
+if (! function_exists('esc_attr')) {
+    function esc_attr(string $text): string
+    {
+        return $text;
+    }
+}
+
+if (! function_exists('esc_url')) {
+    function esc_url(string $url): string
+    {
+        return $url;
+    }
+}
+
 if (! function_exists('do_action')) {
     function do_action(string $hook, ...$args): void {}
 }
