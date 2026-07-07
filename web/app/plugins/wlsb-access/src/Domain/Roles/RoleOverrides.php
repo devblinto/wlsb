@@ -34,6 +34,33 @@ final class RoleOverrides
         return $this->customRoles;
     }
 
+    public function hasCustomRole(string $slug): bool
+    {
+        foreach ($this->customRoles as $role) {
+            if ($role->slug === $slug) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param list<RoleBlueprint> $customRoles
+     */
+    public function withCustomRoles(array $customRoles): self
+    {
+        return new self($customRoles, $this->capToggles, $this->renames, $this->tombstones);
+    }
+
+    /**
+     * @param list<string> $tombstones
+     */
+    public function withTombstones(array $tombstones): self
+    {
+        return new self($this->customRoles, $this->capToggles, $this->renames, $tombstones);
+    }
+
     /**
      * @return array<string, bool> capKey => granted
      */

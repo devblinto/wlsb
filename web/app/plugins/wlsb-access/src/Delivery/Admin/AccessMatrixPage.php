@@ -27,6 +27,8 @@ use Wlsb\Access\Domain\Roles\RoleOverrideRepository;
  */
 final class AccessMatrixPage
 {
+    use AccessAdminSupport;
+
     public const SLUG = 'wlsb-access';
 
     public const ACTION = 'wlsb_save_access';
@@ -90,12 +92,12 @@ final class AccessMatrixPage
 
         $escalation = new CapabilityEscalationPolicy($actorCapabilities, $isAdministrator);
         if (! $escalation->permits($toggles)) {
-            $this->redirect(['wlsb_error' => 'escalation']);
+            $this->redirectTo(self::SLUG, ['wlsb_error' => 'escalation']);
         }
 
         $lockout = new SelfLockoutPolicy((array) $user->roles);
         if ($lockout->wouldLockOut($toggles, Cap::MANAGE_ACCESS)) {
-            $this->redirect(['wlsb_error' => 'lockout']);
+            $this->redirectTo(self::SLUG, ['wlsb_error' => 'lockout']);
         }
 
         $this->overrides->save($this->overrides->load()->withCapToggles($toggles));
@@ -109,18 +111,7 @@ final class AccessMatrixPage
             context: ['toggles' => $toggles],
         ));
 
-        $this->redirect(['wlsb_notice' => 'saved']);
-    }
-
-    private function assertCanManage(): void
-    {
-        if (! current_user_can(Cap::MANAGE_ACCESS)) {
-            wp_die(
-                esc_html__('You do not have permission to manage access.', 'wlsb-access'),
-                '',
-                ['response' => 403],
-            );
-        }
+        $this->redirectTo(self::SLUG, ['wlsb_notice' => 'saved']);
     }
 
     /**
@@ -206,33 +197,5 @@ final class AccessMatrixPage
         $error = isset($_GET['wlsb_error']) ? sanitize_key((string) wp_unslash($_GET['wlsb_error'])) : '';
 
         return in_array($error, ['escalation', 'lockout'], true) ? $error : '';
-    }
-
-    private function actorIp(): ?string
-    {
-        $raw = isset($_SERVER['REMOTE_ADDR'])
-            ? sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR']))
-            : '';
-
-        if ($raw === '') {
-            return null;
-        }
-
-        $packed = inet_pton($raw);
-
-        return $packed === false ? null : $packed;
-    }
-
-    /**
-     * @param array<string, string> $args
-     */
-    private function redirect(array $args): void
-    {
-        wp_safe_redirect(add_query_arg(
-            array_merge(['page' => self::SLUG], $args),
-            admin_url('admin.php'),
-        ));
-
-        exit;
     }
 }

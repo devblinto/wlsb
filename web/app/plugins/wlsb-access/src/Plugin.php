@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace Wlsb\Access;
 
 use Wlsb\Access\Application\Access\BreakGlass;
+use Wlsb\Access\Application\Access\CustomRoleManager;
 use Wlsb\Access\Application\Access\MatrixBuilder;
 use Wlsb\Access\Application\Access\MatrixFormMapper;
 use Wlsb\Access\Application\Reconciliation;
 use Wlsb\Access\Delivery\Admin\AccessMatrixPage;
 use Wlsb\Access\Delivery\Admin\BreakGlassCapabilityFilter;
+use Wlsb\Access\Delivery\Admin\RolesPage;
 use Wlsb\Access\Delivery\Cli\ReconcileCommand;
 use Wlsb\Access\Domain\Capabilities\CapabilityRegistry;
 use Wlsb\Access\Domain\Catalog;
@@ -69,9 +71,13 @@ final class Plugin
         add_action('plugins_loaded', [$plugin, 'boot']);
         add_action('init', [$plugin, 'loadTextDomain']);
 
-        // Admin capability-matrix screen (resolved lazily on admin requests only).
-        add_action('admin_menu', static fn() => $plugin->container->get(AccessMatrixPage::class)->registerMenu());
+        // Admin screens (resolved lazily on admin requests only).
+        add_action('admin_menu', static function () use ($plugin): void {
+            $plugin->container->get(AccessMatrixPage::class)->registerMenu();
+            $plugin->container->get(RolesPage::class)->registerSubmenu();
+        });
         add_action('admin_post_' . AccessMatrixPage::ACTION, static fn() => $plugin->container->get(AccessMatrixPage::class)->handleSave());
+        add_action('admin_post_' . RolesPage::ACTION, static fn() => $plugin->container->get(RolesPage::class)->handleSave());
 
         // Break-glass recovery: runtime-only grant via user_has_cap.
         add_filter('user_has_cap', [$plugin->container->get(BreakGlassCapabilityFilter::class), 'filter'], 10, 4);
@@ -204,6 +210,7 @@ final class Plugin
 
         $container->singleton(MatrixBuilder::class, static fn(Container $c): MatrixBuilder => new MatrixBuilder($c->get(RoleReconciler::class)));
         $container->singleton(MatrixFormMapper::class, static fn(): MatrixFormMapper => new MatrixFormMapper());
+        $container->singleton(CustomRoleManager::class, static fn(): CustomRoleManager => new CustomRoleManager());
 
         $container->singleton(BreakGlass::class, static fn(): BreakGlass => new BreakGlass(
             defined('WLSB_ACCESS_BYPASS') ? (string) WLSB_ACCESS_BYPASS : null,
@@ -220,6 +227,16 @@ final class Plugin
                 $c->get(MatrixBuilder::class),
                 $c->get(RoleOverrideRepository::class),
                 $c->get(MatrixFormMapper::class),
+                $c->get(Reconciliation::class),
+                $c->get(EventLogger::class),
+            ),
+        );
+
+        $container->singleton(
+            RolesPage::class,
+            static fn(Container $c): RolesPage => new RolesPage(
+                $c->get(RoleOverrideRepository::class),
+                $c->get(CustomRoleManager::class),
                 $c->get(Reconciliation::class),
                 $c->get(EventLogger::class),
             ),

@@ -17,6 +17,18 @@
 
     <!-- Output escaping, nonce/CSRF checks, sanitisation, unsafe superglobals. -->
     <rule ref="WordPress.Security"/>
+
+    <!--
+        Exception messages in the pure Domain/Application layers are WordPress-free
+        by design and are escaped at their real output site (admin templates via
+        esc_html()). Escaping them at the throw site would couple those layers to
+        WordPress and double-escape. This sniff stays fully active for the
+        Delivery layer and templates, where output actually happens.
+    -->
+    <rule ref="WordPress.Security.EscapeOutput.ExceptionNotEscaped">
+        <exclude-pattern>*/src/Application/*</exclude-pattern>
+        <exclude-pattern>*/src/Domain/*</exclude-pattern>
+    </rule>
     <!-- Prepared SQL and placeholder correctness for all $wpdb usage. -->
     <rule ref="WordPress.DB.PreparedSQL"/>
     <rule ref="WordPress.DB.PreparedSQLPlaceholders"/>
