@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Wlsb\Access;
 
+use Wlsb\Access\Application\Access\AccessPolicy;
 use Wlsb\Access\Application\Access\BreakGlass;
 use Wlsb\Access\Application\Access\CustomRoleManager;
 use Wlsb\Access\Application\Access\MatrixBuilder;
@@ -16,7 +17,11 @@ use Wlsb\Access\Application\Reconciliation;
 use Wlsb\Access\Application\Registration\EmailVerificationService;
 use Wlsb\Access\Application\Registration\RegistrationService;
 use Wlsb\Access\Application\Registration\RegistrationUrls;
+use Wlsb\Access\Delivery\Access\ContentAccessMetabox;
+use Wlsb\Access\Delivery\Access\FrontendGuard;
+use Wlsb\Access\Delivery\Access\RestGuard;
 use Wlsb\Access\Delivery\Admin\AccessMatrixPage;
+use Wlsb\Access\Delivery\Admin\AccessRulesPage;
 use Wlsb\Access\Delivery\Admin\AdminOverrideReconciler;
 use Wlsb\Access\Delivery\Admin\ApprovalQueuePage;
 use Wlsb\Access\Delivery\Admin\BreakGlassCapabilityFilter;
@@ -26,6 +31,8 @@ use Wlsb\Access\Delivery\Auth\AuthenticationGuard;
 use Wlsb\Access\Delivery\Cli\ReconcileCommand;
 use Wlsb\Access\Delivery\Frontend\RegistrationShortcodes;
 use Wlsb\Access\Delivery\Privacy\PrivacyIntegration;
+use Wlsb\Access\Domain\Access\AccessRuleRepository;
+use Wlsb\Access\Domain\Access\RuleEvaluator;
 use Wlsb\Access\Domain\Approval\ApprovalPolicy;
 use Wlsb\Access\Domain\Approval\ApprovalRepository;
 use Wlsb\Access\Domain\Approval\WorkflowResolver;
@@ -44,6 +51,7 @@ use Wlsb\Access\Domain\Tokens\TokenGenerator;
 use Wlsb\Access\Domain\Tokens\TokenHasher;
 use Wlsb\Access\Domain\Users\UserDirectory;
 use Wlsb\Access\Domain\Workflow\WorkflowConfigStore;
+use Wlsb\Access\Infrastructure\Access\OptionAccessRuleRepository;
 use Wlsb\Access\Infrastructure\Approval\WpdbApprovalRepository;
 use Wlsb\Access\Infrastructure\Clock\SystemClock;
 use Wlsb\Access\Infrastructure\Database\MigrationRunner;
@@ -76,7 +84,7 @@ use Wlsb\Access\Support\Container;
  */
 final class Plugin
 {
-    public const VERSION = '0.3.0';
+    public const VERSION = '0.4.0';
 
     public const TEXT_DOMAIN = 'wlsb-access';
 
@@ -89,6 +97,8 @@ final class Plugin
     private const WORKFLOW_OPTION = 'wlsb_access_workflow_config';
 
     private const PAGES_READY_OPTION = 'wlsb_access_pages_ready';
+
+    private const RULES_OPTION = 'wlsb_access_rules';
 
     private const EVENT_LOG_TABLE = 'wlsb_event_log';
 
@@ -112,11 +122,18 @@ final class Plugin
             $plugin->container->get(RolesPage::class)->registerSubmenu();
             $plugin->container->get(ApprovalQueuePage::class)->registerSubmenu();
             $plugin->container->get(WorkflowConfigPage::class)->registerSubmenu();
+            $plugin->container->get(AccessRulesPage::class)->registerSubmenu();
         });
         add_action('admin_post_' . AccessMatrixPage::ACTION, static fn() => $plugin->container->get(AccessMatrixPage::class)->handleSave());
         add_action('admin_post_' . RolesPage::ACTION, static fn() => $plugin->container->get(RolesPage::class)->handleSave());
         add_action('admin_post_' . ApprovalQueuePage::ACTION, static fn() => $plugin->container->get(ApprovalQueuePage::class)->handleDecision());
         add_action('admin_post_' . WorkflowConfigPage::ACTION, static fn() => $plugin->container->get(WorkflowConfigPage::class)->handleSave());
+        add_action('admin_post_' . AccessRulesPage::ACTION, static fn() => $plugin->container->get(AccessRulesPage::class)->handleSave());
+
+        // Access-control enforcement: front-end guard, REST guard, content metabox.
+        add_action('template_redirect', static fn() => $plugin->container->get(FrontendGuard::class)->guard());
+        add_filter('rest_pre_dispatch', static fn($result, $server, $request) => $plugin->container->get(RestGuard::class)->preDispatch($result, $server, $request), 10, 3);
+        add_action('init', static fn() => $plugin->container->get(ContentAccessMetabox::class)->register());
 
         // Reconcile status when an admin assigns a role out-of-band.
         add_action('set_user_role', static fn($userId, $newRole, $oldRoles = []) => $plugin->container->get(AdminOverrideReconciler::class)->onRoleChanged((int) $userId, (string) $newRole, (array) $oldRoles), 10, 3);
@@ -412,6 +429,20 @@ final class Plugin
             $c->get(EventLogger::class),
             Role::PENDING,
         ));
+
+        // --- Phase 4: access-control enforcement ----------------------------
+
+        $container->singleton(AccessRuleRepository::class, static fn(): AccessRuleRepository => new OptionAccessRuleRepository(self::RULES_OPTION));
+        $container->singleton(RuleEvaluator::class, static fn(): RuleEvaluator => new RuleEvaluator());
+        $container->singleton(AccessPolicy::class, static fn(Container $c): AccessPolicy => new AccessPolicy(
+            $c->get(AccessRuleRepository::class),
+            $c->get(RuleEvaluator::class),
+            static fn(string $capability): bool => current_user_can($capability),
+        ));
+        $container->singleton(FrontendGuard::class, static fn(Container $c): FrontendGuard => new FrontendGuard($c->get(AccessPolicy::class)));
+        $container->singleton(RestGuard::class, static fn(Container $c): RestGuard => new RestGuard($c->get(AccessPolicy::class)));
+        $container->singleton(ContentAccessMetabox::class, static fn(): ContentAccessMetabox => new ContentAccessMetabox());
+        $container->singleton(AccessRulesPage::class, static fn(Container $c): AccessRulesPage => new AccessRulesPage($c->get(AccessRuleRepository::class)));
 
         return $container;
     }
