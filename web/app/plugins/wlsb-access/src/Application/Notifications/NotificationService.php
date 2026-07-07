@@ -85,6 +85,45 @@ final class NotificationService
         ));
     }
 
+    public function sendApproverNotice(int $approverUserId, string $toEmail, string $reviewUrl): bool
+    {
+        $subject = sprintf(
+            /* translators: %s: site name */
+            __('A registration is awaiting your approval at %s', 'wlsb-access'),
+            $this->siteName,
+        );
+
+        $intro = __('A new registration is awaiting approval. Review it here:', 'wlsb-access');
+        $cta = __('Review request', 'wlsb-access');
+
+        return $this->dispatch($approverUserId, new EmailMessage(
+            to: $toEmail,
+            subject: $subject,
+            html: $this->htmlLayout($intro, $reviewUrl, $cta, ''),
+            text: $intro . "\n\n" . $reviewUrl,
+            key: 'approver_notice',
+        ));
+    }
+
+    public function sendRejection(int $userId, string $toEmail): bool
+    {
+        $subject = sprintf(
+            /* translators: %s: site name */
+            __('Update on your registration at %s', 'wlsb-access'),
+            $this->siteName,
+        );
+
+        $body = __('Your registration has been reviewed and was not approved.', 'wlsb-access');
+
+        return $this->dispatch($userId, new EmailMessage(
+            to: $toEmail,
+            subject: $subject,
+            html: '<p>' . esc_html($body) . '</p>',
+            text: $body,
+            key: 'rejected',
+        ));
+    }
+
     private function dispatch(int $userId, EmailMessage $message): bool
     {
         $sent = $this->mailer->send($message);

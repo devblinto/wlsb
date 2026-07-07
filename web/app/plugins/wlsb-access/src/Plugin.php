@@ -8,6 +8,8 @@ use Wlsb\Access\Application\Access\BreakGlass;
 use Wlsb\Access\Application\Access\CustomRoleManager;
 use Wlsb\Access\Application\Access\MatrixBuilder;
 use Wlsb\Access\Application\Access\MatrixFormMapper;
+use Wlsb\Access\Application\Approval\ApprovalOpener;
+use Wlsb\Access\Application\Approval\ApprovalService;
 use Wlsb\Access\Application\Lifecycle\UserLifecycleManager;
 use Wlsb\Access\Application\Notifications\NotificationService;
 use Wlsb\Access\Application\Reconciliation;
@@ -15,12 +17,18 @@ use Wlsb\Access\Application\Registration\EmailVerificationService;
 use Wlsb\Access\Application\Registration\RegistrationService;
 use Wlsb\Access\Application\Registration\RegistrationUrls;
 use Wlsb\Access\Delivery\Admin\AccessMatrixPage;
+use Wlsb\Access\Delivery\Admin\AdminOverrideReconciler;
+use Wlsb\Access\Delivery\Admin\ApprovalQueuePage;
 use Wlsb\Access\Delivery\Admin\BreakGlassCapabilityFilter;
 use Wlsb\Access\Delivery\Admin\RolesPage;
+use Wlsb\Access\Delivery\Admin\WorkflowConfigPage;
 use Wlsb\Access\Delivery\Auth\AuthenticationGuard;
 use Wlsb\Access\Delivery\Cli\ReconcileCommand;
 use Wlsb\Access\Delivery\Frontend\RegistrationShortcodes;
 use Wlsb\Access\Delivery\Privacy\PrivacyIntegration;
+use Wlsb\Access\Domain\Approval\ApprovalPolicy;
+use Wlsb\Access\Domain\Approval\ApprovalRepository;
+use Wlsb\Access\Domain\Approval\WorkflowResolver;
 use Wlsb\Access\Domain\Capabilities\CapabilityRegistry;
 use Wlsb\Access\Domain\Catalog;
 use Wlsb\Access\Domain\Clock\Clock;
@@ -36,8 +44,10 @@ use Wlsb\Access\Domain\Tokens\TokenGenerator;
 use Wlsb\Access\Domain\Tokens\TokenHasher;
 use Wlsb\Access\Domain\Users\UserDirectory;
 use Wlsb\Access\Domain\Workflow\WorkflowConfigStore;
+use Wlsb\Access\Infrastructure\Approval\WpdbApprovalRepository;
 use Wlsb\Access\Infrastructure\Clock\SystemClock;
 use Wlsb\Access\Infrastructure\Database\MigrationRunner;
+use Wlsb\Access\Infrastructure\Database\Migrations\CreateApprovalTables;
 use Wlsb\Access\Infrastructure\Database\Migrations\CreateEventLogTable;
 use Wlsb\Access\Infrastructure\Database\OptionVersionStore;
 use Wlsb\Access\Infrastructure\Database\VersionStore;
@@ -66,7 +76,7 @@ use Wlsb\Access\Support\Container;
  */
 final class Plugin
 {
-    public const VERSION = '0.2.0';
+    public const VERSION = '0.3.0';
 
     public const TEXT_DOMAIN = 'wlsb-access';
 
@@ -100,9 +110,16 @@ final class Plugin
         add_action('admin_menu', static function () use ($plugin): void {
             $plugin->container->get(AccessMatrixPage::class)->registerMenu();
             $plugin->container->get(RolesPage::class)->registerSubmenu();
+            $plugin->container->get(ApprovalQueuePage::class)->registerSubmenu();
+            $plugin->container->get(WorkflowConfigPage::class)->registerSubmenu();
         });
         add_action('admin_post_' . AccessMatrixPage::ACTION, static fn() => $plugin->container->get(AccessMatrixPage::class)->handleSave());
         add_action('admin_post_' . RolesPage::ACTION, static fn() => $plugin->container->get(RolesPage::class)->handleSave());
+        add_action('admin_post_' . ApprovalQueuePage::ACTION, static fn() => $plugin->container->get(ApprovalQueuePage::class)->handleDecision());
+        add_action('admin_post_' . WorkflowConfigPage::ACTION, static fn() => $plugin->container->get(WorkflowConfigPage::class)->handleSave());
+
+        // Reconcile status when an admin assigns a role out-of-band.
+        add_action('set_user_role', static fn($userId, $newRole, $oldRoles = []) => $plugin->container->get(AdminOverrideReconciler::class)->onRoleChanged((int) $userId, (string) $newRole, (array) $oldRoles), 10, 3);
 
         // Break-glass recovery: runtime-only grant via user_has_cap.
         add_filter('user_has_cap', [$plugin->container->get(BreakGlassCapabilityFilter::class), 'filter'], 10, 4);
@@ -250,7 +267,10 @@ final class Plugin
             MigrationRunner::class,
             static fn(Container $c): MigrationRunner => new MigrationRunner(
                 $c->get(VersionStore::class),
-                [new CreateEventLogTable($GLOBALS['wpdb'])],
+                [
+                    new CreateEventLogTable($GLOBALS['wpdb']),
+                    new CreateApprovalTables($GLOBALS['wpdb']),
+                ],
             ),
         );
 
@@ -342,6 +362,7 @@ final class Plugin
             $c->get(RegistrationUrls::class),
             $c->get(Clock::class),
             $c->get(EventLogger::class),
+            approvals: $c->get(ApprovalOpener::class),
         ));
 
         $container->singleton(RegistrationService::class, static fn(Container $c): RegistrationService => new RegistrationService(
@@ -362,6 +383,35 @@ final class Plugin
 
         $container->singleton(AuthenticationGuard::class, static fn(Container $c): AuthenticationGuard => new AuthenticationGuard($c->get(UserLifecycleManager::class)));
         $container->singleton(PrivacyIntegration::class, static fn(Container $c): PrivacyIntegration => new PrivacyIntegration($c->get(UserDirectory::class)));
+
+        // --- Phase 3: approval workflow -------------------------------------
+
+        $container->singleton(ApprovalRepository::class, static fn(): ApprovalRepository => new WpdbApprovalRepository($GLOBALS['wpdb']));
+        $container->singleton(ApprovalPolicy::class, static fn(): ApprovalPolicy => new ApprovalPolicy());
+        $container->singleton(WorkflowResolver::class, static fn(): WorkflowResolver => new WorkflowResolver());
+
+        $container->singleton(ApprovalService::class, static fn(Container $c): ApprovalService => new ApprovalService(
+            $c->get(ApprovalRepository::class),
+            $c->get(WorkflowResolver::class),
+            $c->get(WorkflowConfigStore::class),
+            $c->get(ApprovalPolicy::class),
+            $c->get(UserLifecycleManager::class),
+            $c->get(UserDirectory::class),
+            $c->get(NotificationService::class),
+            $c->get(RegistrationUrls::class),
+            admin_url('admin.php?page=' . ApprovalQueuePage::SLUG),
+            $c->get(EventLogger::class),
+        ));
+        $container->singleton(ApprovalOpener::class, static fn(Container $c): ApprovalOpener => $c->get(ApprovalService::class));
+
+        $container->singleton(ApprovalQueuePage::class, static fn(Container $c): ApprovalQueuePage => new ApprovalQueuePage($c->get(ApprovalService::class), $c->get(UserDirectory::class)));
+        $container->singleton(WorkflowConfigPage::class, static fn(Container $c): WorkflowConfigPage => new WorkflowConfigPage($c->get(WorkflowConfigStore::class)));
+        $container->singleton(AdminOverrideReconciler::class, static fn(Container $c): AdminOverrideReconciler => new AdminOverrideReconciler(
+            $c->get(UserDirectory::class),
+            $c->get(ApprovalService::class),
+            $c->get(EventLogger::class),
+            Role::PENDING,
+        ));
 
         return $container;
     }

@@ -43,6 +43,16 @@ interface UserDirectory
      */
     public function setRole(int $userId, string $role): void;
 
+    /**
+     * @return list<string> the user's role slugs
+     */
+    public function rolesOf(int $userId): array;
+
+    /**
+     * @return list<int> ids of users holding the given role
+     */
+    public function usersWithRole(string $role): array;
+
     public function destroySessions(int $userId): void;
 
     public function getMeta(int $userId, string $key): ?string;

@@ -105,6 +105,21 @@ final class WpUserDirectory implements UserDirectory
         }
     }
 
+    public function rolesOf(int $userId): array
+    {
+        $user = get_userdata($userId);
+
+        return $user ? array_values(array_map('strval', $user->roles)) : [];
+    }
+
+    public function usersWithRole(string $role): array
+    {
+        /** @var list<int|string> $ids */
+        $ids = get_users(['role' => $role, 'fields' => 'ID']);
+
+        return array_map('intval', $ids);
+    }
+
     public function destroySessions(int $userId): void
     {
         WP_Session_Tokens::get_instance($userId)->destroy_all();

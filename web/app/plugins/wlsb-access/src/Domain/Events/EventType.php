@@ -25,4 +25,9 @@ enum EventType: string
     case StatusChanged = 'user.status_changed';
     case NotificationSent = 'notification.sent';
     case NotificationFailed = 'notification.failed';
+
+    case ApprovalRequestOpened = 'approval.request_opened';
+    case ApprovalStepApproved = 'approval.step_approved';
+    case ApprovalRequestApproved = 'approval.request_approved';
+    case ApprovalRequestRejected = 'approval.request_rejected';
 }

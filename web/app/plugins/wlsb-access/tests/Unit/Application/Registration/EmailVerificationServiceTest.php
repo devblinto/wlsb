@@ -27,6 +27,7 @@ function makeVerifier(
     int $nowTs,
     WorkflowConfig $config,
     string $token = 'fixed-raw-token',
+    ?\Wlsb\Access\Application\Approval\ApprovalOpener $approvals = null,
 ): EmailVerificationService {
     return new EmailVerificationService(
         $users,
@@ -40,6 +41,7 @@ function makeVerifier(
         $log,
         ttlSeconds: 3600,
         resendThrottleSeconds: 300,
+        approvals: $approvals,
     );
 }
 
@@ -96,6 +98,20 @@ test('a valid token for an approval-required role moves to pending_approval and 
         ->and($users->getStatus($id))->toBe(LifecycleState::PendingApproval)
         ->and($users->roleOf($id))->toBe('wlsb_pending') // real role NOT granted yet
         ->and($mailer->last()->key)->toBe('awaiting_approval');
+});
+
+test('verifying an approval-required role opens an approval request', function (): void {
+    $users = new InMemoryUserDirectory();
+    $mailer = new ArrayMailer();
+    $id = pendingUser($users);
+    $config = new WorkflowConfig(['subscriber' => new RoleWorkflow('subscriber', registerable: true, selfSelectable: true, requiresApproval: true)]);
+    $spy = new \Wlsb\Access\Tests\Support\SpyApprovalOpener();
+    $verifier = makeVerifier($users, $mailer, new InMemoryEventLogger(), 1000, $config, approvals: $spy);
+    $verifier->issueToken($id, 'u@example.test');
+
+    $verifier->verify($id, 'fixed-raw-token');
+
+    expect($spy->opened)->toBe([[$id, 'subscriber']]);
 });
 
 test('an expired token is rejected and leaves the user pending with the token intact', function (): void {

@@ -14,9 +14,14 @@ trait AccessAdminSupport
 {
     private function assertCanManage(): void
     {
-        if (! current_user_can(Cap::MANAGE_ACCESS)) {
+        $this->assertCan(Cap::MANAGE_ACCESS);
+    }
+
+    private function assertCan(string $capability): void
+    {
+        if (! current_user_can($capability)) {
             wp_die(
-                esc_html__('You do not have permission to manage access.', 'wlsb-access'),
+                esc_html__('You do not have permission to perform this action.', 'wlsb-access'),
                 '',
                 ['response' => 403],
             );

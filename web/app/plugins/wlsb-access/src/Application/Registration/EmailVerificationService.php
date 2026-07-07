@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Wlsb\Access\Application\Registration;
 
+use Wlsb\Access\Application\Approval\ApprovalOpener;
 use Wlsb\Access\Application\Lifecycle\UserLifecycleManager;
 use Wlsb\Access\Application\Notifications\NotificationService;
 use Wlsb\Access\Domain\Clock\Clock;
@@ -39,6 +40,7 @@ final class EmailVerificationService
         private readonly EventLogger $log,
         private readonly int $ttlSeconds = 86400,
         private readonly int $resendThrottleSeconds = 300,
+        private readonly ?ApprovalOpener $approvals = null,
     ) {}
 
     public function issueToken(int $userId, string $email): void
@@ -118,6 +120,7 @@ final class EmailVerificationService
         if ($role !== null && $this->workflow->load()->requiresApproval($role)) {
             $this->lifecycle->transition($userId, LifecycleState::PendingApproval);
             $this->notifications->sendAwaitingApproval($userId, $email);
+            $this->approvals?->open($userId, $role);
 
             return;
         }

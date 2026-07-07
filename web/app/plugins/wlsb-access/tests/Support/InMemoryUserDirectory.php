@@ -108,6 +108,25 @@ final class InMemoryUserDirectory implements UserDirectory
         return $this->users[$userId]['role'] ?? null;
     }
 
+    public function rolesOf(int $userId): array
+    {
+        $role = $this->users[$userId]['role'] ?? null;
+
+        return $role !== null ? [$role] : [];
+    }
+
+    public function usersWithRole(string $role): array
+    {
+        $ids = [];
+        foreach ($this->users as $id => $user) {
+            if (($user['role'] ?? null) === $role) {
+                $ids[] = $id;
+            }
+        }
+
+        return $ids;
+    }
+
     public function destroySessions(int $userId): void
     {
         $this->sessionsDestroyed[$userId] = ($this->sessionsDestroyed[$userId] ?? 0) + 1;
