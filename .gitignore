@@ -38,3 +38,6 @@ docs/
 
 # GitHub
 .github/
+
+# Ansible
+ansible/

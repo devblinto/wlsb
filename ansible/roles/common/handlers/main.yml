@@ -1,3 +1,0 @@
----
-# No handlers required for the common role at present; kept for consistency
-# so `include_role` / `meta: flush_handlers` never fail on a missing file.

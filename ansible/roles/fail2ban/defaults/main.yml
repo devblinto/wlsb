@@ -1,9 +1,0 @@
----
-fail2ban_bantime: "1h"
-fail2ban_findtime: "10m"
-fail2ban_maxretry: 5
-# Never ban these (add your office/VPN IPs). Loopback is always ignored.
-fail2ban_ignoreips:
-  - "127.0.0.1/8"
-  - "::1"
-fail2ban_ssh_port: "{{ ansible_port | default('ssh') }}"

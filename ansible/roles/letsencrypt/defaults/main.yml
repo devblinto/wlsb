@@ -1,7 +1,0 @@
----
-letsencrypt_enabled: true
-letsencrypt_email: ""
-letsencrypt_staging: false
-letsencrypt_webroot: /var/www/letsencrypt
-site_domain: example.com
-site_aliases: []

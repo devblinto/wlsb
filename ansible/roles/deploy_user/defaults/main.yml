@@ -1,7 +1,0 @@
----
-deploy_user: deploy
-deploy_group: "{{ deploy_user }}"
-deploy_path: "/srv/www/{{ site_name | default('app') }}"
-# Public keys allowed to SSH in as an admin (also added to the deploy user so
-# operators can `ssh deploy@host`). REQUIRED before SSH hardening locks things down.
-admin_ssh_keys: []
