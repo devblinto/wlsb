@@ -4,7 +4,12 @@ declare(strict_types=1);
 
 namespace Wlsb\Access;
 
+use Wlsb\Access\Application\Access\BreakGlass;
+use Wlsb\Access\Application\Access\MatrixBuilder;
+use Wlsb\Access\Application\Access\MatrixFormMapper;
 use Wlsb\Access\Application\Reconciliation;
+use Wlsb\Access\Delivery\Admin\AccessMatrixPage;
+use Wlsb\Access\Delivery\Admin\BreakGlassCapabilityFilter;
 use Wlsb\Access\Delivery\Cli\ReconcileCommand;
 use Wlsb\Access\Domain\Capabilities\CapabilityRegistry;
 use Wlsb\Access\Domain\Catalog;
@@ -63,6 +68,13 @@ final class Plugin
         register_deactivation_hook($file, [$plugin, 'deactivate']);
         add_action('plugins_loaded', [$plugin, 'boot']);
         add_action('init', [$plugin, 'loadTextDomain']);
+
+        // Admin capability-matrix screen (resolved lazily on admin requests only).
+        add_action('admin_menu', static fn() => $plugin->container->get(AccessMatrixPage::class)->registerMenu());
+        add_action('admin_post_' . AccessMatrixPage::ACTION, static fn() => $plugin->container->get(AccessMatrixPage::class)->handleSave());
+
+        // Break-glass recovery: runtime-only grant via user_has_cap.
+        add_filter('user_has_cap', [$plugin->container->get(BreakGlassCapabilityFilter::class), 'filter'], 10, 4);
 
         if (defined('WP_CLI') && WP_CLI) {
             \WP_CLI::add_command(
@@ -186,6 +198,29 @@ final class Plugin
                 $c->get(RoleReconciler::class),
                 $c->get(RoleOverrideRepository::class),
                 $c->get(RolesGateway::class),
+                $c->get(EventLogger::class),
+            ),
+        );
+
+        $container->singleton(MatrixBuilder::class, static fn(Container $c): MatrixBuilder => new MatrixBuilder($c->get(RoleReconciler::class)));
+        $container->singleton(MatrixFormMapper::class, static fn(): MatrixFormMapper => new MatrixFormMapper());
+
+        $container->singleton(BreakGlass::class, static fn(): BreakGlass => new BreakGlass(
+            defined('WLSB_ACCESS_BYPASS') ? (string) WLSB_ACCESS_BYPASS : null,
+        ));
+        $container->singleton(
+            BreakGlassCapabilityFilter::class,
+            static fn(Container $c): BreakGlassCapabilityFilter => new BreakGlassCapabilityFilter($c->get(BreakGlass::class)),
+        );
+
+        $container->singleton(
+            AccessMatrixPage::class,
+            static fn(Container $c): AccessMatrixPage => new AccessMatrixPage(
+                $c->get(CapabilityRegistry::class),
+                $c->get(MatrixBuilder::class),
+                $c->get(RoleOverrideRepository::class),
+                $c->get(MatrixFormMapper::class),
+                $c->get(Reconciliation::class),
                 $c->get(EventLogger::class),
             ),
         );

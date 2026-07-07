@@ -15,6 +15,11 @@ interface RolesGateway
 {
     public function roleExists(string $slug): bool;
 
+    /**
+     * @return list<string> slugs of all roles that currently exist
+     */
+    public function allRoleSlugs(): array;
+
     public function roleName(string $slug): ?string;
 
     /**

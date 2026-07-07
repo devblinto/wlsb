@@ -23,6 +23,11 @@ final class InMemoryRolesGateway implements RolesGateway
         return isset($this->roles[$slug]);
     }
 
+    public function allRoleSlugs(): array
+    {
+        return array_keys($this->roles);
+    }
+
     public function roleName(string $slug): ?string
     {
         return $this->roles[$slug]['name'] ?? null;

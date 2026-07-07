@@ -50,6 +50,17 @@ final class RoleOverrides
         return $this->capToggles;
     }
 
+    /**
+     * Immutable copy with the capability toggles replaced, preserving custom
+     * roles, renames, and tombstones.
+     *
+     * @param array<string, array<string, bool>> $capToggles
+     */
+    public function withCapToggles(array $capToggles): self
+    {
+        return new self($this->customRoles, $capToggles, $this->renames, $this->tombstones);
+    }
+
     public function renameFor(string $roleSlug): ?string
     {
         return $this->renames[$roleSlug] ?? null;

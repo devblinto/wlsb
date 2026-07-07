@@ -50,6 +50,14 @@ final class CapabilityRegistry
     }
 
     /**
+     * @return list<string> capability keys in registration order
+     */
+    public function keys(): array
+    {
+        return array_keys($this->capabilities);
+    }
+
+    /**
      * @return list<CapabilityGroup> ordered by their `order`, then registration
      */
     public function groups(): array

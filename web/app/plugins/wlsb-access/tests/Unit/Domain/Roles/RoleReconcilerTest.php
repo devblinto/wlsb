@@ -191,6 +191,21 @@ test('materialize skips grants for roles that do not exist', function (): void {
         ->and($gateway->snapshot())->toHaveKey('wlsb_pending');
 });
 
+test('materialize revokes a managed capability that is no longer granted, but leaves native caps alone', function (): void {
+    // administrator was previously granted wlsb_approve_requests (a managed cap)
+    // via an override that has since been removed; manage_options is a native cap.
+    $gateway = new InMemoryRolesGateway([
+        'administrator' => ['name' => 'Administrator', 'caps' => ['manage_options' => true, 'wlsb_approve_requests' => true]],
+    ]);
+
+    makeRoleReconciler()->materialize(new RoleOverrides(), $gateway);
+    $caps = $gateway->snapshot()['administrator']['caps'];
+
+    expect($caps)->not->toHaveKey('wlsb_approve_requests')  // orphaned managed cap revoked
+        ->and($caps)->toHaveKey('manage_options')           // native cap untouched
+        ->and($caps)->toHaveKey('wlsb_manage_access');      // default grant applied
+});
+
 test('materialize renames and updates capabilities when they differ', function (): void {
     $gateway = new InMemoryRolesGateway([
         'administrator' => ['name' => 'Administrator', 'caps' => []],

@@ -3,6 +3,7 @@
     <description>Security-focused WPCS sniffs for the wlsb-access plugin. Formatting is handled separately by Laravel Pint (PER/PSR-12); this ruleset intentionally covers only security-critical concerns.</description>
 
     <file>src</file>
+    <file>templates</file>
     <file>wlsb-access.php</file>
 
     <arg name="extensions" value="php"/>

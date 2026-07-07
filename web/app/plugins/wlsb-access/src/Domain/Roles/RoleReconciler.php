@@ -111,7 +111,10 @@ final class RoleReconciler
         $updated = [];
         $grantsApplied = [];
 
+        $ownedSlugs = [];
+
         foreach ($this->effectiveOwnedRoles($overrides) as $role) {
+            $ownedSlugs[$role->slug] = true;
             $desired = $role->capabilityMap();
 
             if (! $gateway->roleExists($role->slug)) {
@@ -156,20 +159,36 @@ final class RoleReconciler
             }
         }
 
+        // The plugin's managed capabilities are authoritative on every non-owned
+        // role: granted where configured, and revoked where present but no longer
+        // configured (so removing a grant override cleans up the orphaned cap).
+        // Capabilities the plugin does not manage (WordPress-native caps like
+        // edit_posts) are never touched.
+        $managedCapabilities = $this->capabilities->keys();
+
+        $desiredGrants = [];
         foreach ($this->effectiveGrants($overrides) as $grant) {
-            if (! $gateway->roleExists($grant->roleSlug)) {
-                continue;
+            $desiredGrants[$grant->roleSlug][$grant->capability] = $grant->granted;
+        }
+
+        foreach ($gateway->allRoleSlugs() as $slug) {
+            if (isset($ownedSlugs[$slug])) {
+                continue; // owned roles fully controlled above
             }
 
-            $capabilities = $gateway->roleCapabilities($grant->roleSlug);
-            $has = isset($capabilities[$grant->capability]);
+            $current = $gateway->roleCapabilities($slug);
 
-            if ($grant->granted && ! $has) {
-                $gateway->grantCap($grant->roleSlug, $grant->capability);
-                $grantsApplied[] = $grant->roleSlug . ':' . $grant->capability;
-            } elseif (! $grant->granted && $has) {
-                $gateway->revokeCap($grant->roleSlug, $grant->capability);
-                $grantsApplied[] = $grant->roleSlug . ':' . $grant->capability;
+            foreach ($managedCapabilities as $capability) {
+                $want = $desiredGrants[$slug][$capability] ?? false;
+                $has = isset($current[$capability]);
+
+                if ($want && ! $has) {
+                    $gateway->grantCap($slug, $capability);
+                    $grantsApplied[] = $slug . ':' . $capability;
+                } elseif (! $want && $has) {
+                    $gateway->revokeCap($slug, $capability);
+                    $grantsApplied[] = $slug . ':' . $capability;
+                }
             }
         }
 

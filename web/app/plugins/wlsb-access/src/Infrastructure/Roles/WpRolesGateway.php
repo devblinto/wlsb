@@ -18,6 +18,11 @@ final class WpRolesGateway implements RolesGateway
         return wp_roles()->is_role($slug);
     }
 
+    public function allRoleSlugs(): array
+    {
+        return array_keys(wp_roles()->roles);
+    }
+
     public function roleName(string $slug): ?string
     {
         return wp_roles()->role_names[$slug] ?? null;
